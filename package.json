@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx watch ./server.ts",
     "build": "tsc",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "contract:emit": "prisma contract emit"
   },
   "keywords": [],
   "author": "",
@@ -19,6 +20,7 @@
     "express": "^5.2.1"
   },
   "devDependencies": {
+    "@prisma/cli-engine": "^0.6.1",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.2",
