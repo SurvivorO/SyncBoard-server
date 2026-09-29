@@ -11,8 +11,8 @@ export async function hashPassword(
 function comparePassword(
     password: string, 
     hash: string
-){
-
+): Promise<boolean> {
+    return bcrypt.compare(password, hash);
 }
 
 function generateAccessToken(
