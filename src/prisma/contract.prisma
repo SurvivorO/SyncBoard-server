@@ -1,21 +1,192 @@
 // use prisma-8
 
 model User {
-  id        Int      @id @default(autoincrement())
-  email     String   @unique
-  username  String?
-  name      String?
-  posts     Post[]
-  createdAt TimestamptzString @default(now())
-  updatedAt temporal.updatedAtString()
+  id    String     @id @default(cuid(2))
+  email String     @unique
+  name  String?
+  // Password is hashed with bcrypt before storage
+  passwordHash String
+
+  // Relations
+  ownedBoards    Board[]
+  memberships    Membership[]
+  refreshTokens  RefreshToken[]
+  activityRecords Activity[]
+
+  createdAt DateTime @default(now())
+  updatedAt temporal.updatedAt()
 }
 
-model Post {
-  id        Int      @id @default(autoincrement())
-  title     String
-  content   String?
-  author    User     @relation(fields: [authorId], references: [id])
-  authorId  Int
-  createdAt TimestamptzString @default(now())
-  updatedAt temporal.updatedAtString()
+model RefreshToken {
+  id    String   @id @default(cuid(2))
+  userId String
+  user  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Hash of the refresh token (not the token itself)
+  tokenHash String @unique
+  
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt]) // For cleanup queries
+}
+
+// ============================================================================
+// BOARDS & MEMBERSHIP
+// ============================================================================
+
+model Board {
+  id    String  @id @default(cuid(2))
+  title String
+  
+  ownerId String
+  owner   User    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // Relations
+  memberships Membership[]
+  lists       List[]
+  activities  Activity[]
+
+  createdAt DateTime @default(now())
+  updatedAt temporal.updatedAt()
+
+  @@index([ownerId])
+}
+
+model Membership {
+  id String @id @default(cuid(2))
+
+  userId  String
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  boardId String
+  board   Board   @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  // Role: OWNER, EDITOR, VIEWER
+  // We use an enum here for type safety
+  role    MemberRole
+
+  createdAt DateTime @default(now())
+  updatedAt temporal.updatedAt()
+
+  // A user can only have one role per board
+  @@unique([userId, boardId])
+  @@index([boardId])
+  @@index([userId])
+}
+
+enum MemberRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+// ============================================================================
+// LISTS & CARDS
+// ============================================================================
+
+model List {
+  id    String  @id @default(cuid(2))
+  title String
+  
+  boardId String
+  board   Board   @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  // Fractional indexing for ordering
+  // Format: "a0", "a1", "m0", etc. (see fractional-index library)
+  position String
+
+  // Relations
+  cards Card[]
+
+  createdAt DateTime @default(now())
+  updatedAt temporal.updatedAt()
+
+  @@index([boardId])
+  // Ensure position is unique within a board (for safety, though fractional indexing
+  // typically uses position + sequence to handle duplicates during concurrent edits)
+  @@unique([boardId, position])
+}
+
+model Card {
+  id    String  @id @default(cuid(2))
+  title String
+  
+  description String?
+  
+  // Priority: LOW, MEDIUM, HIGH
+  priority CardPriority?
+  
+  // Due date for the card
+  dueDate DateTime?
+  
+  listId String
+  list   List    @relation(fields: [listId], references: [id], onDelete: Cascade)
+
+  // Fractional indexing for ordering within a list
+  position String
+
+  // Version for optimistic concurrency control
+  // Incremented on every update; stale updates (with old version) are rejected
+  version Int @default(0)
+
+  // Relations
+  activities Activity[]
+
+  createdAt DateTime @default(now())
+  updatedAt temporal.updatedAt()
+
+  @@index([listId])
+  @@unique([listId, position])
+}
+
+enum CardPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+// ============================================================================
+// ACTIVITY LOG
+// ============================================================================
+
+model Activity {
+  id    String  @id @default(cuid(2))
+
+  boardId String
+  board   Board   @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  cardId String?
+  card   Card?   @relation(fields: [cardId], references: [id], onDelete: SetNull)
+
+  // Type of action: CARD_CREATED, CARD_UPDATED, CARD_MOVED, CARD_DELETED,
+  // LIST_CREATED, LIST_UPDATED, LIST_DELETED, MEMBER_ADDED, MEMBER_REMOVED, etc.
+  type ActivityType
+
+  // JSON payload with details about what changed
+  // Example for CARD_MOVED: { "cardId": "...", "fromListId": "...", "toListId": "..." }
+  payload Json
+
+  createdAt DateTime @default(now())
+
+  @@index([boardId])
+  @@index([userId])
+  @@index([createdAt]) // For activity feed queries
+}
+
+enum ActivityType {
+  CARD_CREATED
+  CARD_UPDATED
+  CARD_MOVED
+  CARD_DELETED
+  LIST_CREATED
+  LIST_UPDATED
+  LIST_DELETED
+  MEMBER_ADDED
+  MEMBER_REMOVED
+  MEMBER_ROLE_CHANGED
 }
