@@ -1,7 +1,11 @@
-function hashPassword(
-    password: string
-) {
+import bcrypt from "bcrypt";
 
+export async function hashPassword(
+    password: string,
+    saltRounds = 18
+): Promise<string> {
+    
+    return bcrypt.hash(password, saltRounds);
 }
 
 function comparePassword(
