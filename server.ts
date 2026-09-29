@@ -1,13 +1,17 @@
-import {config} from "dotenv";
+import { env } from "./env.js";
+import { db } from "./src/prisma/db.js";
 import app from "./app.js";
 
-config();
+const server = app.listen(env.PORT, () => {
+    console.log(`🚀 Server running on http://localhost:${env.PORT} `);
+});
 
-const PORT = process.env.EXPRESS_PORT;
+// Graceful shutdown
 
-app.listen(PORT, () => {
-    console.log("server started at :", PORT);
+process.on('SIGTERM', async () => {
+    console.log('SIGTERM received, shutting down gracefully');
+    server.close(async() => {
+        await db.close();
+        process.exit(0);
+    })
 })
-
-
-
