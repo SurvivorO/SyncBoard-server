@@ -1,4 +1,5 @@
 import bcrypt from "bcrypt";
+import { Temporal } from "@js-temporal/polyfill";
 import jwt, { type SignOptions } from "jsonwebtoken";
 import { env } from "../../../env";
 import type { JWTPayload } from "../../types/server";
@@ -67,7 +68,7 @@ async function createRefreshToken(
     await db.orm.public.RefreshToken.create({
         userId,
         tokenHash: await hashPassword(token),
-        expiresAt: new Date(decodedToken.exp * 1000)
+        expiresAt: Temporal.Instant.fromEpochMilliseconds(decodedToken.exp * 1000)
     });
 
     return token;
@@ -123,10 +124,10 @@ async function verifyRefreshToken(
         throw new Error('Refresh token not found or Revoked');
     }
 
-    const now = new Date();
+    const now = Temporal.Now.instant();
 
     for(const storedToken of storedTokens) {
-        if(storedToken.expiresAt < now) {
+        if(Temporal.Instant.compare(storedToken.expiresAt, now) < 0) {
             continue;
         }
 
@@ -160,7 +161,7 @@ async function rotateRefreshToken(
     }
 
     const newTokenHash = await hashPassword(newToken);
-    const expiresAt = new Date(decodedToken.exp * 1000);
+    const expiresAt = Temporal.Instant.fromEpochMilliseconds(decodedToken.exp * 1000);
 
     await db.transaction(async (tx) => {
         await tx.orm.public.RefreshToken

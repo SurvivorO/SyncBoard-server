@@ -26,6 +26,10 @@ const errorHandler: ErrorRequestHandler = (error, _req, res, _next): void => {
         return;
     }
 
+    if (process.env.NODE_ENV !== "production") {
+        console.error(error);
+    }
+
     res.status(500).json({
         error: "Internal server error"
     });

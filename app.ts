@@ -1,10 +1,8 @@
-import express, { request } from "express";
+import express from "express";
 import cors from "cors";
-import { env } from "./env";
+import { env } from "./env.js";
 import errorHandler from "./src/modules/errors/errorHandler.js";
 import authRoutes from "./src/modules/auth/authRoutes.js";
-
-import { json } from "node:stream/consumers";
 
 const app = express();
 
