@@ -1,7 +1,7 @@
 import express, { request } from "express";
 import cors from "cors";
 import { env } from "./env";
-import { errorHandler } from "./src/modules/errors/AppError";
+import errorHandler from "./src/modules/errors/errorHandler.js";
 
 import { json } from "node:stream/consumers";
 
