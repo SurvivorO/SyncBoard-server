@@ -45,9 +45,32 @@ function generateRefreshToken(
 ): string {
     return jwt.sign(
         { userId },
-        env.JWT_REFRESH_TOKEN,
+        env.JWT_REFRESH_SECRET,
         refreshTokenOptions
     );
+}
+
+async function createRefreshToken(
+    userId: string
+): Promise<string> {
+    const token = generateRefreshToken(userId);
+    const decodedToken = jwt.decode(token);
+
+    if(
+        decodedToken === null ||
+        typeof decodedToken === 'string' ||
+        typeof decodedToken.exp !== 'number'
+    ) {
+        throw new Error('Invalid refresh token expiration');
+    }
+
+    await db.orm.public.RefreshToken.create({
+        userId,
+        tokenHash: await hashPassword(token),
+        expiresAt: new Date(decodedToken.exp * 1000)
+    });
+
+    return token;
 }
 
 function verifyAccessToken(
@@ -83,7 +106,7 @@ async function verifyRefreshToken(
     token:string
 ) : Promise<{ userId: string, tokenId: string }> {
 
-    const payload = jwt.verify(token, env.JWT_REFRESH_TOKEN) as jwt.JwtPayload;
+    const payload = jwt.verify(token, env.JWT_REFRESH_SECRET) as jwt.JwtPayload;
 
     if(!isRefreshPayload(payload)) {
         throw new Error('Invalid refresh token payload');
@@ -122,7 +145,7 @@ async function verifyRefreshToken(
 }
 
 async function rotateRefreshToken(
-    oldTokenHash: string,
+    oldTokenId: string,
     userId: string
 ): Promise<string> {
     const newToken = generateRefreshToken(userId);
@@ -142,8 +165,8 @@ async function rotateRefreshToken(
     await db.transaction(async (tx) => {
         await tx.orm.public.RefreshToken
         .where({
+            id: oldTokenId,
             userId,
-            tokenHash: oldTokenHash
         })
         .delete();
 
@@ -162,6 +185,7 @@ export {
     comparePassword,
     generateAccessToken,
     generateRefreshToken,
+    createRefreshToken,
     verifyAccessToken,
     verifyRefreshToken,
     rotateRefreshToken
