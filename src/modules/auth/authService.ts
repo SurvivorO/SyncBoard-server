@@ -28,37 +28,6 @@ const refreshTokenOptions: SignOptions = {
 }
 
 
-type RefreshTokenData = {
-    token: string;
-    tokenHash: string;
-    expiresAt: Date;
-};
-
-async function buildRefreshToken(
-    userId: string
-): Promise<RefreshTokenData> {
-    const token = jwt.sign(
-        { userId },
-        env.JWT_REFRESH_TOKEN,
-        refreshTokenOptions
-    );
-    const decodedToken = jwt.decode(token);
-
-    if(
-        decodedToken === null ||
-        typeof decodedToken === 'string' ||
-        typeof decodedToken.exp !== 'number'
-    ) {
-        throw new Error('Invalid refresh token expiration');
-    }
-
-    return {
-        token,
-        tokenHash: await hashPassword(token),
-        expiresAt: new Date(decodedToken.exp * 1000)
-    };
-}
-
 function generateAccessToken(
     userId: string, 
     email: string
@@ -71,18 +40,14 @@ function generateAccessToken(
     );
 }
 
-async function generateRefreshToken(
+function generateRefreshToken(
     userId: string
-): Promise<string> {
-    const refreshToken = await buildRefreshToken(userId);
-
-    await db.orm.public.RefreshToken.create({
-        userId,
-        tokenHash: refreshToken.tokenHash,
-        expiresAt: refreshToken.expiresAt
-    });
-
-    return refreshToken.token;
+): string {
+    return jwt.sign(
+        { userId },
+        env.JWT_REFRESH_TOKEN,
+        refreshTokenOptions
+    );
 }
 
 function verifyAccessToken(
@@ -160,7 +125,19 @@ async function rotateRefreshToken(
     oldTokenHash: string,
     userId: string
 ): Promise<string> {
-    const refreshToken = await buildRefreshToken(userId);
+    const newToken = generateRefreshToken(userId);
+    const decodedToken = jwt.decode(newToken);
+
+    if(
+        decodedToken === null ||
+        typeof decodedToken === 'string' ||
+        typeof decodedToken.exp !== 'number'
+    ) {
+        throw new Error('Invalid refresh token expiration');
+    }
+
+    const newTokenHash = await hashPassword(newToken);
+    const expiresAt = new Date(decodedToken.exp * 1000);
 
     await db.transaction(async (tx) => {
         await tx.orm.public.RefreshToken
@@ -172,12 +149,12 @@ async function rotateRefreshToken(
 
         await tx.orm.public.RefreshToken.create({
             userId,
-            tokenHash: refreshToken.tokenHash,
-            expiresAt: refreshToken.expiresAt
+            tokenHash: newTokenHash,
+            expiresAt
         });
     });
 
-    return refreshToken.token;
+    return newToken;
 }
 
 export {
