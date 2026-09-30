@@ -1,6 +1,7 @@
 import express, { request } from "express";
 import cors from "cors";
 import { env } from "./env";
+import { errorHandler } from "./src/modules/errors/AppError";
 
 import { json } from "node:stream/consumers";
 
@@ -19,5 +20,6 @@ app.get('/health', (req, res) => res.json({
 }))
 
 // Error Handler
+app.use(errorHandler);
 
 export default app;
