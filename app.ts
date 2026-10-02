@@ -3,6 +3,7 @@ import cors from "cors";
 import { env } from "./env.js";
 import errorHandler from "./src/modules/errors/errorHandler.js";
 import authRoutes from "./src/modules/auth/authRoutes.js";
+import { boardRoutes } from "./src/modules/boards/boardRoutes.js";
 
 const app = express();
 
@@ -13,6 +14,7 @@ app.use(express.json());
 
 // Routes
 app.use('/auth', authRoutes);
+app.use('/boards', boardRoutes());
 
 // health check
 app.get('/health', (req, res) => res.json({
