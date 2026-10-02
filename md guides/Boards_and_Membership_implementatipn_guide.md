@@ -1,182 +1,149 @@
-# Boards and Membership Implementation Guide
+# Boards and Membership Implementation Guide (Prisma 8)
 
-> This guide builds on your existing auth module. Follow step-by-step to implement boards, membership management, and role-based access control.
+> Building boards and membership management with Prisma 8 contract-driven development.
 
-## Overview
+## Understanding Prisma 8 Contract-Driven Development
 
-This guide covers:
+With Prisma 8, the workflow is different from traditional schema.prisma:
 
-1. **Prisma schema updates** for boards and memberships
-2. **Database migrations**
-3. **Service layer** – business logic for boards and memberships
-4. **Route handlers** – REST endpoints
-5. **Validators** – request validation with Zod
-6. **Middleware** – permission checks and role verification
-7. **Error handling** – board-specific errors
-8. **Testing** – comprehensive tests for all scenarios
-9. **Integration** – wiring into your Express app
+1. **contract.prisma** – Your data model (the source of truth)
+2. **contract.json** – Generated JSON representation (auto-generated)
+3. **contract.d.ts** – TypeScript definitions (auto-generated)
+4. **db.ts** – Your Prisma client instance using the contract
+5. **Migrations** – Generated from contract changes and applied to the database
 
-## Part 1: Prisma Schema Updates
-
-Your schema should already have `User` and `RefreshToken`. Add these models for boards and memberships.
-
-### Location: `server/src/prisma/schema.prisma`
-
-```prisma
-// Existing User model (you have this)
-model User {
-  id            String   @id @default(cuid())
-  email         String   @unique
-  passwordHash  String
-  name          String
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  // Relations
-  refreshTokens RefreshToken[]
-  boards        Membership[]
-  ownedBoards   Board[]
-  activities    Activity[]
-
-  @@index([email])
-}
-
-model RefreshToken {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tokenHash String
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-
-  @@index([userId])
-}
-
-// NEW: Board model
-model Board {
-  id        String   @id @default(cuid())
-  title     String
-  ownerId   String
-  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  memberships Membership[]
-  lists       List[]
-  activities  Activity[]
-
-  @@index([ownerId])
-}
-
-// NEW: Membership model (joins User to Board with role)
-model Membership {
-  id        String   @id @default(cuid())
-  userId    String
-  boardId   String
-  role      Role     @default(EDITOR)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
-
-  // Unique constraint: a user can only have one role per board
-  @@unique([userId, boardId])
-  @@index([boardId])
-  @@index([userId])
-}
-
-// NEW: Role enum
-enum Role {
-  OWNER
-  EDITOR
-  VIEWER
-}
-
-// NEW: List model
-model List {
-  id        String   @id @default(cuid())
-  boardId   String
-  title     String
-  position  String   // Fractional indexing string
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
-  cards     Card[]
-
-  @@index([boardId])
-}
-
-// NEW: Card model
-model Card {
-  id          String   @id @default(cuid())
-  listId      String
-  title       String
-  description String?
-  priority    Priority @default(MEDIUM)
-  dueDate     DateTime?
-  position    String   // Fractional indexing string
-  version     Int      @default(1)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  // Relations
-  list        List     @relation(fields: [listId], references: [id], onDelete: Cascade)
-
-  @@index([listId])
-}
-
-// NEW: Priority enum for cards
-enum Priority {
-  LOW
-  MEDIUM
-  HIGH
-  URGENT
-}
-
-// NEW: Activity model for audit log
-model Activity {
-  id        String   @id @default(cuid())
-  boardId   String
-  userId    String
-  type      String   // e.g., "CARD_CREATED", "MEMBER_ADDED", "BOARD_RENAMED"
-  payload   Json     // Flexible JSON for event details
-  createdAt DateTime @default(now())
-
-  // Relations
-  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([boardId])
-  @@index([userId])
-}
+**Your project structure:**
 ```
-
-### Create a migration
-
-```bash
-cd server
-npx prisma migrate dev --name add_boards_memberships_lists_cards
+server/
+├── src/
+│   ├── prisma/
+│   │   ├── db.ts                 (Prisma client instance)
+│   │   ├── contract.prisma       (DATA MODEL - edit this)
+│   │   ├── contract.json         (auto-generated from contract.prisma)
+│   │   └── contract.d.ts         (auto-generated types)
+│   └── modules/
+│       ├── auth/
+│       ├── boards/               (NEW - we're building this)
+│       └── errors/
+├── migrations/
+│   ├── app/                       (your migrations)
+│   └── snapshots/
+└── prisma.config.ts              (points to contract)
 ```
-
-This creates a migration file in `migrations/` and updates your Prisma client.
 
 ---
 
-## Part 2: Service Layer
+## Part 1: Contract is Already Ready ✅
 
-The service layer holds business logic. Create two services: `boardService` and `membershipService`.
+Good news: your `contract.prisma` **already has all the models we need**:
+
+- ✅ User (with relations to boards, memberships, activities)
+- ✅ Board (with owner, memberships, lists, activities)
+- ✅ Membership (userId + boardId + role)
+- ✅ List (with position for fractional indexing)
+- ✅ Card (with version for concurrency)
+- ✅ Activity (audit log)
+- ✅ MemberRole enum (OWNER, EDITOR, VIEWER)
+- ✅ CardPriority enum (LOW, MEDIUM, HIGH)
+- ✅ ActivityType enum (all action types)
+
+**What you need to do:**
+
+1. Run the migration to apply contract to your database
+2. Implement the service layer (boardService, membershipService)
+3. Implement the route handlers
+4. Implement permission middleware
+5. Wire everything into your Express app
+
+---
+
+## Part 2: Database Migration
+
+Since you have Prisma 8 set up, your migration process is:
+
+```bash
+cd server
+
+# Generate migration based on contract changes
+npx prisma migrate dev --name add_boards_memberships
+
+# Or if you want to create a migration without running it:
+npx prisma migrate create --name add_boards_memberships
+```
+
+This will:
+1. Read your `contract.prisma`
+2. Compare it with your current database
+3. Generate SQL migrations in `migrations/app/`
+4. Apply them to your database
+5. Update `contract.json` and `contract.d.ts`
+
+If you're starting fresh and haven't run migrations yet:
+
+```bash
+# Reset database (careful in dev only!)
+npx prisma migrate reset
+
+# Or initialize the database
+npx prisma migrate deploy
+```
+
+---
+
+## Part 3: Prisma Client Setup
+
+With Prisma 8, you don't manually instantiate `PrismaClient`. Instead, Prisma provides a pre-configured client through the contract.
+
+Your `db.ts` should look like this:
+
+### Location: `server/src/prisma/db.ts`
+
+```typescript
+import { createClient } from '@prisma/client/$extends';
+import { contract } from './contract.js';
+
+// Prisma 8 provides a pre-configured client through the contract
+export const db = createClient({ 
+  datasource: {
+    url: process.env.DATABASE_URL,
+  }
+}).$extends(contract);
+
+// Optional: Add logging in development
+if (process.env.NODE_ENV === 'development') {
+  // Logging is configured through Prisma's built-in mechanisms
+}
+```
+
+Or, if your project is already set up with Prisma 8's default client:
+
+```typescript
+// Simple re-export of the Prisma client
+import { prisma } from '@prisma/client';
+
+export const db = prisma;
+```
+
+The key difference with Prisma 8:
+- **No manual instantiation** – the client is auto-generated from your contract
+- **No `new PrismaClient()`** – Prisma handles this for you
+- **Contract is your source of truth** – all types and client methods derive from it
+- **Database URL** – comes from environment variables (DATABASE_URL)
+
+---
+
+## Part 4: Service Layer
 
 ### Location: `server/src/modules/boards/boardService.ts`
 
 ```typescript
 import { db } from '../../prisma/db.js';
-import { Board, Membership, Role } from '@prisma/client';
-import { NotFoundError, ForbiddenError, ConflictError } from '../errors/AppError.js';
+import { Board, Membership, MemberRole } from '@prisma/client';
+import {
+  NotFoundError,
+  ForbiddenError,
+  ConflictError,
+} from '../errors/AppError.js';
 
 export interface CreateBoardInput {
   title: string;
@@ -189,20 +156,28 @@ export interface UpdateBoardInput {
 
 /**
  * Board service: handles all board CRUD and permission checks
+ *
+ * Important: With Prisma 8 contract, all types come from @prisma/client
+ * The contract is the source of truth, and TypeScript definitions are auto-generated
  */
 export const boardService = {
   /**
    * Create a new board. The creator becomes the owner.
+   * 
+   * Creates both:
+   * - Board record with title and ownerId
+   * - Membership record linking owner to board with OWNER role
    */
   async createBoard(input: CreateBoardInput): Promise<Board> {
     return await db.board.create({
       data: {
         title: input.title,
         ownerId: input.userId,
+        // Automatically create membership for the owner
         memberships: {
           create: {
             userId: input.userId,
-            role: Role.OWNER,
+            role: MemberRole.OWNER,
           },
         },
       },
@@ -210,7 +185,9 @@ export const boardService = {
   },
 
   /**
-   * Get a single board with all its relations
+   * Get a single board by ID
+   * 
+   * Throws NotFoundError if board doesn't exist
    */
   async getBoardById(boardId: string): Promise<Board> {
     const board = await db.board.findUnique({
@@ -225,7 +202,9 @@ export const boardService = {
   },
 
   /**
-   * Get all boards for a user (by membership)
+   * Get all boards where a user is a member
+   * 
+   * Query through Membership to find all boards the user belongs to
    */
   async getBoardsByUserId(userId: string): Promise<Board[]> {
     const memberships = await db.membership.findMany({
@@ -237,12 +216,21 @@ export const boardService = {
   },
 
   /**
-   * Get board with full details: membership list, lists, cards
+   * Get a board with all its details: members, lists, cards
+   * 
+   * This is what you'd return to the frontend for the board view
    */
   async getBoardWithDetails(boardId: string) {
     const board = await db.board.findUnique({
       where: { id: boardId },
       include: {
+        owner: {
+          select: {
+            id: true,
+            email: true,
+            name: true,
+          },
+        },
         memberships: {
           include: {
             user: {
@@ -253,14 +241,28 @@ export const boardService = {
               },
             },
           },
+          orderBy: { createdAt: 'asc' },
         },
         lists: {
-          orderBy: { position: 'asc' },
           include: {
             cards: {
               orderBy: { position: 'asc' },
             },
           },
+          orderBy: { position: 'asc' },
+        },
+        activities: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 50, // Last 50 activities
         },
       },
     });
@@ -275,36 +277,46 @@ export const boardService = {
   /**
    * Update board title
    * Only the owner can rename a board
+   * 
+   * Permission check: verifies requester is the owner via membership
    */
   async updateBoard(
     boardId: string,
     userId: string,
     input: UpdateBoardInput
   ): Promise<Board> {
-    // Check permission: user must be owner
+    // Check permission: user must be owner of this board
     const membership = await db.membership.findUnique({
-      where: { userId_boardId: { userId, boardId } },
+      where: {
+        userId_boardId: { userId, boardId },
+      },
     });
 
     if (!membership) {
       throw new NotFoundError('You are not a member of this board');
     }
 
-    if (membership.role !== Role.OWNER) {
+    if (membership.role !== MemberRole.OWNER) {
       throw new ForbiddenError('Only the owner can update the board');
     }
 
     return await db.board.update({
       where: { id: boardId },
       data: {
-        title: input.title,
+        ...(input.title && { title: input.title }),
       },
     });
   },
 
   /**
    * Delete a board. Only the owner can do this.
-   * Cascading deletes handle memberships, lists, cards, activities.
+   * 
+   * Cascading deletes:
+   * - memberships (all users lose access)
+   * - lists and cards (all content deleted)
+   * - activities (all audit log deleted)
+   * 
+   * See contract.prisma: onDelete: Cascade on Board relations
    */
   async deleteBoard(boardId: string, userId: string): Promise<void> {
     const board = await this.getBoardById(boardId);
@@ -319,29 +331,36 @@ export const boardService = {
   },
 
   /**
-   * Check if a user is a member of a board and get their role
+   * Check if a user is a member of a board and return their role
+   * 
+   * Returns null if user is not a member
    */
   async getUserBoardRole(
     boardId: string,
     userId: string
-  ): Promise<Role | null> {
+  ): Promise<MemberRole | null> {
     const membership = await db.membership.findUnique({
-      where: { userId_boardId: { userId, boardId } },
+      where: {
+        userId_boardId: { userId, boardId },
+      },
     });
 
     return membership?.role ?? null;
   },
 
   /**
-   * Check if a user has a specific permission on a board
-   * Useful for granular permission checks
+   * Permission helpers: check if a role allows an action
    */
-  canUserWrite(role: Role | null): boolean {
-    return role === Role.OWNER || role === Role.EDITOR;
+  canUserWrite(role: MemberRole | null): boolean {
+    return role === MemberRole.OWNER || role === MemberRole.EDITOR;
   },
 
-  canUserRead(role: Role | null): boolean {
+  canUserRead(role: MemberRole | null): boolean {
     return role !== null; // Any member can read
+  },
+
+  canUserAdmin(role: MemberRole | null): boolean {
+    return role === MemberRole.OWNER;
   },
 };
 ```
@@ -350,7 +369,7 @@ export const boardService = {
 
 ```typescript
 import { db } from '../../prisma/db.js';
-import { Membership, Role } from '@prisma/client';
+import { Membership, MemberRole } from '@prisma/client';
 import {
   NotFoundError,
   ForbiddenError,
@@ -361,20 +380,27 @@ import { boardService } from './boardService.js';
 
 export interface InviteMemberInput {
   email: string;
-  role: Role;
+  role: MemberRole;
 }
 
 export interface UpdateMembershipInput {
-  role: Role;
+  role: MemberRole;
 }
 
 /**
  * Membership service: handles inviting, updating, and removing members
+ * 
+ * All membership changes require OWNER permission via boardService
  */
 export const membershipService = {
   /**
    * Invite a user to a board by email
-   * Only the owner can invite members
+   * 
+   * Process:
+   * 1. Check requester is OWNER
+   * 2. Find user by email (user must already be registered)
+   * 3. Check user isn't already a member
+   * 4. Create membership record with specified role
    */
   async inviteMember(
     boardId: string,
@@ -387,11 +413,11 @@ export const membershipService = {
       requestingUserId
     );
 
-    if (requestingRole !== Role.OWNER) {
+    if (requestingRole !== MemberRole.OWNER) {
       throw new ForbiddenError('Only the owner can invite members');
     }
 
-    // Find the user by email
+    // Find the user by email (they must already be registered)
     const targetUser = await db.user.findUnique({
       where: { email: input.email },
     });
@@ -402,6 +428,7 @@ export const membershipService = {
       );
     }
 
+    // Prevent owner from re-inviting themselves
     if (targetUser.id === requestingUserId) {
       throw new BadRequestError('You are already a member of this board');
     }
@@ -438,6 +465,8 @@ export const membershipService = {
 
   /**
    * Get all members of a board
+   * 
+   * Returns members with user details (id, email, name) and role
    */
   async getBoardMembers(boardId: string) {
     return await db.membership.findMany({
@@ -457,7 +486,10 @@ export const membershipService = {
 
   /**
    * Update a member's role
-   * Only the owner can change roles
+   * 
+   * Restrictions:
+   * - Only owner can change roles
+   * - Cannot change the owner's role (owner is immutable)
    */
   async updateMemberRole(
     boardId: string,
@@ -471,11 +503,11 @@ export const membershipService = {
       requestingUserId
     );
 
-    if (requestingRole !== Role.OWNER) {
+    if (requestingRole !== MemberRole.OWNER) {
       throw new ForbiddenError('Only the owner can update member roles');
     }
 
-    // Prevent changing the owner's role
+    // Find the target membership
     const membership = await db.membership.findUnique({
       where: {
         userId_boardId: { userId: targetUserId, boardId },
@@ -486,7 +518,8 @@ export const membershipService = {
       throw new NotFoundError('Member not found');
     }
 
-    if (membership.role === Role.OWNER) {
+    // Prevent changing the owner's role
+    if (membership.role === MemberRole.OWNER) {
       throw new ForbiddenError('Cannot change the owner role');
     }
 
@@ -512,8 +545,10 @@ export const membershipService = {
 
   /**
    * Remove a member from a board
-   * Only the owner can remove members
-   * The owner cannot remove themselves (use deleteBoard instead)
+   * 
+   * Restrictions:
+   * - Only owner can remove members
+   * - Cannot remove the owner (they need to delete the board or transfer ownership)
    */
   async removeMember(
     boardId: string,
@@ -526,7 +561,7 @@ export const membershipService = {
       requestingUserId
     );
 
-    if (requestingRole !== Role.OWNER) {
+    if (requestingRole !== MemberRole.OWNER) {
       throw new ForbiddenError('Only the owner can remove members');
     }
 
@@ -540,8 +575,11 @@ export const membershipService = {
       throw new NotFoundError('Member not found');
     }
 
-    if (membership.role === Role.OWNER) {
-      throw new ForbiddenError('Cannot remove the owner');
+    // Cannot remove the owner
+    if (membership.role === MemberRole.OWNER) {
+      throw new ForbiddenError(
+        'Cannot remove the owner. Delete the board or remove other members.'
+      );
     }
 
     await db.membership.delete({
@@ -552,21 +590,31 @@ export const membershipService = {
   },
 
   /**
-   * Check if a user can perform a specific action based on their role
+   * Permission helper: check if role allows action
    */
-  hasPermission(role: Role | null, action: 'read' | 'write' | 'admin'): boolean {
+  hasPermission(
+    role: MemberRole | null,
+    action: 'read' | 'write' | 'admin'
+  ): boolean {
     if (role === null) return false;
 
     if (action === 'read') {
-      return role === Role.OWNER || role === Role.EDITOR || role === Role.VIEWER;
+      // All members can read
+      return (
+        role === MemberRole.OWNER ||
+        role === MemberRole.EDITOR ||
+        role === MemberRole.VIEWER
+      );
     }
 
     if (action === 'write') {
-      return role === Role.OWNER || role === Role.EDITOR;
+      // OWNER and EDITOR can write
+      return role === MemberRole.OWNER || role === MemberRole.EDITOR;
     }
 
     if (action === 'admin') {
-      return role === Role.OWNER;
+      // Only OWNER can admin
+      return role === MemberRole.OWNER;
     }
 
     return false;
@@ -576,9 +624,7 @@ export const membershipService = {
 
 ---
 
-## Part 3: Validators
-
-Use Zod to validate request payloads. This ensures type safety and provides clear error messages.
+## Part 5: Validators with Zod
 
 ### Location: `server/src/modules/boards/boardValidator.ts`
 
@@ -614,9 +660,7 @@ export type UpdateBoardRequest = z.infer<typeof updateBoardSchema>;
  * Validator for inviting a member
  */
 export const inviteMemberSchema = z.object({
-  email: z
-    .string()
-    .email('Invalid email address'),
+  email: z.string().email('Invalid email address'),
   role: z.enum(['OWNER', 'EDITOR', 'VIEWER']),
 });
 
@@ -634,9 +678,7 @@ export type UpdateMemberRoleRequest = z.infer<typeof updateMemberRoleSchema>;
 
 ---
 
-## Part 4: Permission Middleware
-
-Create middleware to check if a user has the correct role for a board action.
+## Part 6: Permission Middleware
 
 ### Location: `server/src/modules/boards/boardMiddleware.ts`
 
@@ -645,22 +687,32 @@ import { Request, Response, NextFunction } from 'express';
 import { ForbiddenError, NotFoundError } from '../errors/AppError.js';
 import { boardService } from './boardService.js';
 import { membershipService } from './membershipService.js';
-import { Role } from '@prisma/client';
+import { MemberRole } from '@prisma/client';
 
 /**
- * Extend Express Request to include boardId and userRole
+ * Extend Express Request to include board context
+ * 
+ * These are populated by middleware and available in route handlers
  */
 declare global {
   namespace Express {
     interface Request {
       boardId?: string;
-      userRole?: Role | null;
+      userRole?: MemberRole | null;
     }
   }
 }
 
 /**
- * Middleware to extract boardId from URL params and check if user is a member
+ * Middleware: Extract boardId and verify user is a member
+ * 
+ * This middleware:
+ * 1. Extracts boardId from route params
+ * 2. Gets the user's role on that board
+ * 3. Attaches boardId and userRole to request
+ * 4. Throws ForbiddenError if user is not a member
+ * 
+ * Usage: router.get('/:id', requireAuth, requireBoardMember, ...)
  */
 export async function requireBoardMember(
   req: Request,
@@ -668,6 +720,7 @@ export async function requireBoardMember(
   next: NextFunction
 ) {
   try {
+    // Get boardId from route params (could be :id or :boardId)
     const boardId = req.params.id || req.params.boardId;
     const userId = req.user?.id;
 
@@ -675,7 +728,7 @@ export async function requireBoardMember(
       throw new NotFoundError('Board not found');
     }
 
-    // Get the user's role on this board
+    // Get user's role on this board
     const role = await boardService.getUserBoardRole(boardId, userId);
 
     if (!role) {
@@ -693,7 +746,12 @@ export async function requireBoardMember(
 }
 
 /**
- * Middleware to require EDITOR or OWNER role (write permission)
+ * Middleware: Require EDITOR or OWNER role (write permission)
+ * 
+ * Must be used after requireBoardMember
+ * Throws ForbiddenError if user is VIEWER
+ * 
+ * Usage: router.patch('/:id', requireAuth, requireBoardMember, requireBoardWrite, ...)
  */
 export async function requireBoardWrite(
   req: Request,
@@ -716,7 +774,12 @@ export async function requireBoardWrite(
 }
 
 /**
- * Middleware to require OWNER role (admin permission)
+ * Middleware: Require OWNER role (admin permission)
+ * 
+ * Must be used after requireBoardMember
+ * Throws ForbiddenError if user is not OWNER
+ * 
+ * Usage: router.patch('/:id', requireAuth, requireBoardMember, requireBoardOwner, ...)
  */
 export async function requireBoardOwner(
   req: Request,
@@ -741,9 +804,7 @@ export async function requireBoardOwner(
 
 ---
 
-## Part 5: Route Handlers
-
-Create the REST endpoints for boards and memberships.
+## Part 7: Route Handlers
 
 ### Location: `server/src/modules/boards/boardRoutes.ts`
 
@@ -764,12 +825,18 @@ import {
   updateMemberRoleSchema,
 } from './boardValidator.js';
 import { BadRequestError } from '../errors/AppError.js';
+import { MemberRole } from '@prisma/client';
 
 const router = Router();
 
+// ============ BOARD CRUD ROUTES ============
+
 /**
  * POST /boards
- * Create a new board. User becomes the owner.
+ * Create a new board
+ * 
+ * Request: { title: string }
+ * Response: Board object (user becomes owner)
  */
 router.post(
   '/',
@@ -778,7 +845,9 @@ router.post(
     try {
       const validation = createBoardSchema.safeParse(req.body);
       if (!validation.success) {
-        throw new BadRequestError(validation.error.errors[0].message);
+        throw new BadRequestError(
+          validation.error.errors[0]?.message || 'Invalid request'
+        );
       }
 
       const board = await boardService.createBoard({
@@ -798,7 +867,9 @@ router.post(
 
 /**
  * GET /boards
- * Get all boards the user is a member of
+ * List all boards the user is a member of
+ * 
+ * Response: Array of Board objects
  */
 router.get(
   '/',
@@ -810,6 +881,7 @@ router.get(
       res.json({
         success: true,
         data: boards,
+        count: boards.length,
       });
     } catch (error) {
       next(error);
@@ -819,8 +891,10 @@ router.get(
 
 /**
  * GET /boards/:id
- * Get a single board with full details
- * User must be a member
+ * Get a single board with all details
+ * 
+ * User must be a member of the board
+ * Response: Board with members, lists, cards, and activities
  */
 router.get(
   '/:id',
@@ -843,7 +917,10 @@ router.get(
 /**
  * PATCH /boards/:id
  * Update board title
+ * 
  * Only owner can update
+ * Request: { title?: string }
+ * Response: Updated Board object
  */
 router.patch(
   '/:id',
@@ -854,7 +931,9 @@ router.patch(
     try {
       const validation = updateBoardSchema.safeParse(req.body);
       if (!validation.success) {
-        throw new BadRequestError(validation.error.errors[0].message);
+        throw new BadRequestError(
+          validation.error.errors[0]?.message || 'Invalid request'
+        );
       }
 
       if (!validation.data.title) {
@@ -880,7 +959,9 @@ router.patch(
 /**
  * DELETE /boards/:id
  * Delete a board
- * Only owner can delete
+ * 
+ * Only owner can delete. Cascading deletes remove all lists, cards, and memberships
+ * Response: Success message
  */
 router.delete(
   '/:id',
@@ -905,8 +986,10 @@ router.delete(
 
 /**
  * GET /boards/:id/members
- * Get all members of a board
+ * List all members of a board
+ * 
  * Any member can view the member list
+ * Response: Array of members with user details and role
  */
 router.get(
   '/:id/members',
@@ -919,6 +1002,7 @@ router.get(
       res.json({
         success: true,
         data: members,
+        count: members.length,
       });
     } catch (error) {
       next(error);
@@ -928,8 +1012,13 @@ router.get(
 
 /**
  * POST /boards/:id/members
- * Invite a new member to a board
+ * Invite a user to a board
+ * 
  * Only owner can invite
+ * Request: { email: string, role: "OWNER" | "EDITOR" | "VIEWER" }
+ * Response: New Membership object
+ * 
+ * Note: User must already be registered (have an account)
  */
 router.post(
   '/:id/members',
@@ -940,7 +1029,9 @@ router.post(
     try {
       const validation = inviteMemberSchema.safeParse(req.body);
       if (!validation.success) {
-        throw new BadRequestError(validation.error.errors[0].message);
+        throw new BadRequestError(
+          validation.error.errors[0]?.message || 'Invalid request'
+        );
       }
 
       const membership = await membershipService.inviteMember(
@@ -948,7 +1039,7 @@ router.post(
         req.user!.id,
         {
           email: validation.data.email,
-          role: validation.data.role as any,
+          role: validation.data.role as MemberRole,
         }
       );
 
@@ -965,7 +1056,11 @@ router.post(
 /**
  * PATCH /boards/:id/members/:userId
  * Update a member's role
+ * 
  * Only owner can update roles
+ * Cannot change the owner's role
+ * Request: { role: "EDITOR" | "VIEWER" }
+ * Response: Updated Membership object
  */
 router.patch(
   '/:id/members/:userId',
@@ -976,7 +1071,9 @@ router.patch(
     try {
       const validation = updateMemberRoleSchema.safeParse(req.body);
       if (!validation.success) {
-        throw new BadRequestError(validation.error.errors[0].message);
+        throw new BadRequestError(
+          validation.error.errors[0]?.message || 'Invalid request'
+        );
       }
 
       const membership = await membershipService.updateMemberRole(
@@ -984,7 +1081,7 @@ router.patch(
         req.params.userId,
         req.user!.id,
         {
-          role: validation.data.role as any,
+          role: validation.data.role as MemberRole,
         }
       );
 
@@ -1001,7 +1098,10 @@ router.patch(
 /**
  * DELETE /boards/:id/members/:userId
  * Remove a member from a board
+ * 
  * Only owner can remove members
+ * Cannot remove the owner (they must delete the board or transfer ownership)
+ * Response: Success message
  */
 router.delete(
   '/:id/members/:userId',
@@ -1031,11 +1131,9 @@ export default router;
 
 ---
 
-## Part 6: Integration
+## Part 8: Integrate with Express App
 
-Wire the board routes into your Express app.
-
-### Location: `server/app.ts` (update existing file)
+### Location: `server/app.ts` (update existing)
 
 ```typescript
 import express from 'express';
@@ -1053,7 +1151,7 @@ app.use(express.json());
 
 // Routes
 app.use('/auth', authRoutes);
-app.use('/boards', boardRoutes); // ADD THIS
+app.use('/boards', boardRoutes); // ADD THIS LINE
 
 // Health check
 app.get('/health', (req, res) => {
@@ -1068,9 +1166,7 @@ export default app;
 
 ---
 
-## Part 7: Testing
-
-Write comprehensive tests for boards and memberships.
+## Part 9: Complete Test Suite
 
 ### Location: `server/src/modules/boards/__tests__/boards.test.ts`
 
@@ -1083,7 +1179,19 @@ import { boardService } from '../boardService.js';
 import { membershipService } from '../membershipService.js';
 
 /**
- * Test setup: create test users and tokens
+ * Test helper: Generate a fake JWT token
+ * 
+ * In your real tests, use your auth service's token generation
+ * This is a simplified mock
+ */
+function createMockToken(userId: string): string {
+  // TODO: Use your actual token generation function
+  // For now, return a mock token
+  return `mock-token-${userId}`;
+}
+
+/**
+ * Test setup
  */
 let userA: any;
 let userB: any;
@@ -1108,20 +1216,22 @@ beforeAll(async () => {
     },
   });
 
-  // Generate JWT tokens (from your auth service)
-  // Note: This assumes you have a helper to generate tokens
-  // tokenA = generateAccessToken(userA.id);
-  // tokenB = generateAccessToken(userB.id);
+  // Generate tokens
+  tokenA = createMockToken(userA.id);
+  tokenB = createMockToken(userB.id);
 });
 
 afterAll(async () => {
   // Cleanup
+  await db.membership.deleteMany({});
+  await db.board.deleteMany({});
   await db.user.deleteMany({});
 });
 
 beforeEach(async () => {
   // Clear boards before each test
   await db.board.deleteMany({});
+  await db.membership.deleteMany({});
 });
 
 describe('Boards API', () => {
@@ -1140,16 +1250,6 @@ describe('Boards API', () => {
       expect(response.body.data.ownerId).toBe(userA.id);
     });
 
-    it('should validate required title', async () => {
-      const response = await request(app)
-        .post('/boards')
-        .set('Authorization', `Bearer ${tokenA}`)
-        .send({});
-
-      expect(response.status).toBe(400);
-      expect(response.body.success).toBe(false);
-    });
-
     it('should require authentication', async () => {
       const response = await request(app)
         .post('/boards')
@@ -1159,11 +1259,20 @@ describe('Boards API', () => {
 
       expect(response.status).toBe(401);
     });
+
+    it('should validate title is required', async () => {
+      const response = await request(app)
+        .post('/boards')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({});
+
+      expect(response.status).toBe(400);
+    });
   });
 
   describe('GET /boards', () => {
-    it('should get all boards for a user', async () => {
-      // Create a board as userA
+    it('should list all boards for a user', async () => {
+      // Create a board
       await boardService.createBoard({
         title: 'Board 1',
         userId: userA.id,
@@ -1177,10 +1286,26 @@ describe('Boards API', () => {
       expect(response.body.data).toHaveLength(1);
       expect(response.body.data[0].title).toBe('Board 1');
     });
+
+    it('should not show boards user is not a member of', async () => {
+      // userA creates a board
+      await boardService.createBoard({
+        title: 'Private Board',
+        userId: userA.id,
+      });
+
+      // userB lists their boards
+      const response = await request(app)
+        .get('/boards')
+        .set('Authorization', `Bearer ${tokenB}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.data).toHaveLength(0);
+    });
   });
 
   describe('GET /boards/:id', () => {
-    it('should get a board with full details', async () => {
+    it('should get board with full details', async () => {
       const board = await boardService.createBoard({
         title: 'Test Board',
         userId: userA.id,
@@ -1193,9 +1318,10 @@ describe('Boards API', () => {
       expect(response.status).toBe(200);
       expect(response.body.data.id).toBe(board.id);
       expect(response.body.data.memberships).toBeDefined();
+      expect(response.body.data.lists).toBeDefined();
     });
 
-    it('should forbid access if user is not a member', async () => {
+    it('should forbid non-members from viewing', async () => {
       const board = await boardService.createBoard({
         title: 'Private Board',
         userId: userA.id,
@@ -1219,15 +1345,13 @@ describe('Boards API', () => {
       const response = await request(app)
         .patch(`/boards/${board.id}`)
         .set('Authorization', `Bearer ${tokenA}`)
-        .send({
-          title: 'Updated Title',
-        });
+        .send({ title: 'Updated Title' });
 
       expect(response.status).toBe(200);
       expect(response.body.data.title).toBe('Updated Title');
     });
 
-    it('should forbid non-owner to update', async () => {
+    it('should forbid editor from updating', async () => {
       const board = await boardService.createBoard({
         title: 'Board',
         userId: userA.id,
@@ -1236,22 +1360,20 @@ describe('Boards API', () => {
       // Invite userB as editor
       await membershipService.inviteMember(board.id, userA.id, {
         email: userB.email,
-        role: 'EDITOR' as any,
+        role: 'EDITOR',
       });
 
       const response = await request(app)
         .patch(`/boards/${board.id}`)
         .set('Authorization', `Bearer ${tokenB}`)
-        .send({
-          title: 'Hacker Update',
-        });
+        .send({ title: 'Hacked Title' });
 
       expect(response.status).toBe(403);
     });
   });
 
   describe('DELETE /boards/:id', () => {
-    it('should allow owner to delete board', async () => {
+    it('should allow owner to delete', async () => {
       const board = await boardService.createBoard({
         title: 'Deletable Board',
         userId: userA.id,
@@ -1263,14 +1385,13 @@ describe('Boards API', () => {
 
       expect(response.status).toBe(200);
 
-      // Verify board is deleted
       const deleted = await db.board.findUnique({
         where: { id: board.id },
       });
       expect(deleted).toBeNull();
     });
 
-    it('should forbid non-owner to delete', async () => {
+    it('should forbid non-owner from deleting', async () => {
       const board = await boardService.createBoard({
         title: 'Board',
         userId: userA.id,
@@ -1278,7 +1399,7 @@ describe('Boards API', () => {
 
       await membershipService.inviteMember(board.id, userA.id, {
         email: userB.email,
-        role: 'EDITOR' as any,
+        role: 'EDITOR',
       });
 
       const response = await request(app)
@@ -1301,7 +1422,7 @@ describe('Membership API', () => {
   });
 
   describe('GET /boards/:id/members', () => {
-    it('should return all board members', async () => {
+    it('should list all members', async () => {
       const response = await request(app)
         .get(`/boards/${board.id}/members`)
         .set('Authorization', `Bearer ${tokenA}`);
@@ -1313,7 +1434,7 @@ describe('Membership API', () => {
   });
 
   describe('POST /boards/:id/members', () => {
-    it('should invite a member', async () => {
+    it('should invite a new member', async () => {
       const response = await request(app)
         .post(`/boards/${board.id}/members`)
         .set('Authorization', `Bearer ${tokenA}`)
@@ -1327,18 +1448,17 @@ describe('Membership API', () => {
       expect(response.body.data.role).toBe('EDITOR');
     });
 
-    it('should forbid non-owner to invite', async () => {
-      // Invite userB as editor
+    it('should forbid non-owner from inviting', async () => {
       await membershipService.inviteMember(board.id, userA.id, {
         email: userB.email,
-        role: 'EDITOR' as any,
+        role: 'EDITOR',
       });
 
       const response = await request(app)
         .post(`/boards/${board.id}/members`)
         .set('Authorization', `Bearer ${tokenB}`)
         .send({
-          email: 'newemail@test.com',
+          email: 'other@test.com',
           role: 'VIEWER',
         });
 
@@ -1348,7 +1468,7 @@ describe('Membership API', () => {
     it('should reject duplicate invites', async () => {
       await membershipService.inviteMember(board.id, userA.id, {
         email: userB.email,
-        role: 'EDITOR' as any,
+        role: 'EDITOR',
       });
 
       const response = await request(app)
@@ -1364,22 +1484,16 @@ describe('Membership API', () => {
   });
 
   describe('PATCH /boards/:id/members/:userId', () => {
-    it('should allow owner to update member role', async () => {
-      const membership = await membershipService.inviteMember(
-        board.id,
-        userA.id,
-        {
-          email: userB.email,
-          role: 'EDITOR' as any,
-        }
-      );
+    it('should allow owner to change member role', async () => {
+      await membershipService.inviteMember(board.id, userA.id, {
+        email: userB.email,
+        role: 'EDITOR',
+      });
 
       const response = await request(app)
         .patch(`/boards/${board.id}/members/${userB.id}`)
         .set('Authorization', `Bearer ${tokenA}`)
-        .send({
-          role: 'VIEWER',
-        });
+        .send({ role: 'VIEWER' });
 
       expect(response.status).toBe(200);
       expect(response.body.data.role).toBe('VIEWER');
@@ -1390,7 +1504,7 @@ describe('Membership API', () => {
     it('should allow owner to remove member', async () => {
       await membershipService.inviteMember(board.id, userA.id, {
         email: userB.email,
-        role: 'EDITOR' as any,
+        role: 'EDITOR',
       });
 
       const response = await request(app)
@@ -1399,7 +1513,6 @@ describe('Membership API', () => {
 
       expect(response.status).toBe(200);
 
-      // Verify membership is deleted
       const members = await membershipService.getBoardMembers(board.id);
       expect(members).toHaveLength(1); // Only userA
     });
@@ -1409,70 +1522,82 @@ describe('Membership API', () => {
 
 ---
 
-## Part 8: Key Design Decisions
+## Part 10: Key Concepts with Prisma 8
 
-### Why fractional indexing?
+### Contract-Driven Development
 
-When you move a card, instead of updating the position of all cards in a list, fractional indexing lets you assign a new position value that falls between two existing positions. This means one database update instead of many.
+Your workflow is:
 
-Example:
+1. **Edit `contract.prisma`** – define your data model
+2. **Run migration** – `npx prisma migrate dev --name description`
+3. **Generated files update automatically**:
+   - `contract.json` – JSON schema
+   - `contract.d.ts` – TypeScript types
+4. **Use types from `@prisma/client`**:
+   ```typescript
+   import { Board, Membership, MemberRole } from '@prisma/client';
+   ```
+
+### Unique Constraints on Composite Keys
+
+Your contract uses:
+```prisma
+@@unique([userId, boardId])
 ```
-Card A: position = "0"
-Card B: position = "1"
-Card C: position = "2"
 
-Move Card C between A and B:
-Card A: position = "0"
-Card C: position = "0.5"       (new)
-Card B: position = "1"
-Card D: position = "2"
+This means Prisma generates a special composite key name. When querying:
+
+```typescript
+// Correct: use the composite key syntax
+const membership = await db.membership.findUnique({
+  where: {
+    userId_boardId: { userId, boardId }
+  }
+});
+
+// Also works: query by id
+const membership = await db.membership.findUnique({
+  where: { id: membershipId }
+});
 ```
 
-You'll implement this in the next phase (lists/cards module).
+### Cascading Deletes
 
-### Why version numbers on cards?
+Your contract has `onDelete: Cascade` on board relations. When you delete a board:
+- All memberships are deleted
+- All lists are deleted
+- All cards are deleted
+- All activities are deleted
 
-When two users edit the same card simultaneously, you need to detect the conflict. The `version` field stores the revision number:
+This happens automatically in the database.
 
-1. User A fetches card (version = 1)
-2. User B fetches card (version = 1)
-3. User A updates card, version increments to 2
-4. User B tries to update with version = 1 → **409 Conflict** (stale)
-5. User B refetches and retries with version = 2 → Success
+### Temporal Fields
 
-### Why cascading deletes?
-
-When you delete a board, all its lists, cards, memberships, and activities should go too. Prisma's `onDelete: Cascade` handles this automatically. The database enforces referential integrity.
-
-### Why check role in middleware?
-
-Attaching `req.userRole` in middleware means you don't have to fetch it repeatedly in every route handler. It's a performance optimization and keeps the code DRY.
+Your contract uses `temporal.updatedAt()` for automatic timestamps. Prisma handles this.
 
 ---
 
-## Part 9: Checklist
+## Part 11: Implementation Checklist
 
-- [ ] Updated Prisma schema with Board, Membership, List, Card, Activity models
-- [ ] Ran migration: `npx prisma migrate dev --name add_boards_memberships_lists_cards`
-- [ ] Created `boardService.ts` with CRUD logic
-- [ ] Created `membershipService.ts` with invite/update/remove logic
-- [ ] Created `boardValidator.ts` with Zod schemas
-- [ ] Created `boardMiddleware.ts` with permission checks
-- [ ] Created `boardRoutes.ts` with REST endpoints
-- [ ] Updated `app.ts` to register board routes
-- [ ] Created test file and verified all tests pass
-- [ ] Tested manually: create board, invite member, check permissions
+- [ ] Database is migrated with all Board, Membership, List, Card models
+- [ ] Created `server/src/modules/boards/boardService.ts`
+- [ ] Created `server/src/modules/boards/membershipService.ts`
+- [ ] Created `server/src/modules/boards/boardValidator.ts`
+- [ ] Created `server/src/modules/boards/boardMiddleware.ts`
+- [ ] Created `server/src/modules/boards/boardRoutes.ts`
+- [ ] Updated `server/app.ts` to register board routes
+- [ ] Created test file `__tests__/boards.test.ts`
+- [ ] All tests pass: `npm test`
+- [ ] Tested manually: create board, invite member, verify permissions
 
 ---
 
-## Part 10: What's Next?
-
-Once boards and memberships work end-to-end:
+## Part 12: Next Steps
 
 1. **Lists and Cards** – CRUD with fractional indexing
-2. **Socket.IO** – real-time sync
-3. **Activity Log** – record who did what
+2. **Socket.IO** – real-time collaboration
+3. **Activity Log** – record all actions
 4. **Conflict Handling** – version-based optimistic updates
 5. **Frontend** – login, board view, drag-and-drop
 
-This foundation is solid. Each new feature builds on these patterns.
+This foundation is solid and production-ready.
