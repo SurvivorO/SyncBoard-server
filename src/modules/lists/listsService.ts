@@ -119,7 +119,7 @@ async function getBoardLists(boardId: string): Promise<List[]> {
 		.all();
 }
 
-export type { ListUpdates };
+export type { List, ListUpdates };
 export {
 	calculateInitialPosition,
 	createList,
