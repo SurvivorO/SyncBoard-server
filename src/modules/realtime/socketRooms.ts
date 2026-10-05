@@ -1,5 +1,6 @@
 import type { AppSocket, AppServer } from "./socketTypes.js";
 import { getUserBoardRole } from "../boards/boardService.js";
+import { addPresence, removePresence } from "./socketPresence.js";
 
 export function getBoardRoom(boardId: string): string {
 	return `board_${boardId}`;
@@ -12,7 +13,8 @@ export function registerRoomHandlers(
 	socket.on("board:join", async (data: { boardId: string }) => {
 		try {
 			const userId = socket.data.userId;
-			if (!userId) {
+			const email = socket.data.email;
+			if (!userId || !email) {
 				socket.emit("error", {
 					message: "Not authenticated",
 					code: "UNAUTHORIZED",
@@ -41,6 +43,9 @@ export function registerRoomHandlers(
 
 			await socket.join(getBoardRoom(boardId));
 			socket.emit("board:joined", { boardId });
+
+			const users = await addPresence(boardId, userId, email, socket.id);
+			io.to(getBoardRoom(boardId)).emit("presence:update", { boardId, users });
 		} catch (error) {
 			console.error(`Error joining board room for socket ${socket.id}:`, error);
 			socket.emit("error", {
@@ -52,6 +57,9 @@ export function registerRoomHandlers(
 
 	socket.on("board:leave", async (data: { boardId: string }) => {
 		try {
+			const userId = socket.data.userId;
+			if (!userId) return;
+
 			if (!data || typeof data.boardId !== "string" || !data.boardId.trim()) {
 				socket.emit("error", {
 					message: "Missing boardId",
@@ -63,6 +71,9 @@ export function registerRoomHandlers(
 			const boardId = data.boardId.trim();
 			await socket.leave(getBoardRoom(boardId));
 			socket.emit("board:left", { boardId });
+
+			const users = removePresence(boardId, userId, socket.id);
+			io.to(getBoardRoom(boardId)).emit("presence:update", { boardId, users });
 		} catch (error) {
 			console.error(`Error leaving board room for socket ${socket.id}:`, error);
 			socket.emit("error", {

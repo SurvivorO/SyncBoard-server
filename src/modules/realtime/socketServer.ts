@@ -2,7 +2,8 @@ import type { Server as HttpServer } from "node:http";
 import { Server } from "socket.io";
 import { env } from "../../../env.js";
 import { socketAuthMiddleware } from "./socketAuth.js";
-import { registerRoomHandlers } from "./socketRooms.js";
+import { registerRoomHandlers, getBoardRoom } from "./socketRooms.js";
+import { removePresenceFromAll } from "./socketPresence.js";
 import type {
 	AppServer,
 	AppSocket,
@@ -38,7 +39,13 @@ export function initSocketServer(httpServer: HttpServer): AppServer {
 		});
 
 		socket.on("disconnect", (reason: string) => {
-			// Disconnection logging / cleanup hook
+			const updates = removePresenceFromAll(socket.id);
+			for (const update of updates) {
+				io?.to(getBoardRoom(update.boardId)).emit("presence:update", {
+					boardId: update.boardId,
+					users: update.users,
+				});
+			}
 		});
 	});
 

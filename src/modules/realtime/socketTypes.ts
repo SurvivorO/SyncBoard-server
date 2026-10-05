@@ -1,4 +1,5 @@
 import type { Socket, Server } from "socket.io";
+import type { PresenceUser } from "./socketPresence.js";
 
 export interface SocketData {
 	userId?: string;
@@ -10,6 +11,7 @@ export interface ServerToClientEvents {
 	auth_error: (err: { message: string; code?: string }) => void;
 	"board:joined": (data: { boardId: string }) => void;
 	"board:left": (data: { boardId: string }) => void;
+	"presence:update": (data: { boardId: string; users: Record<string, PresenceUser> }) => void;
 	[key: string]: (...args: any[]) => void;
 }
 
