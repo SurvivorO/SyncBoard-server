@@ -1,6 +1,7 @@
 import type { Server as HttpServer } from "node:http";
-import { Server, type Socket } from "socket.io";
+import { Server } from "socket.io";
 import { env } from "../../../env.js";
+import { socketAuthMiddleware } from "./socketAuth.js";
 import type {
 	AppServer,
 	AppSocket,
@@ -25,6 +26,8 @@ export function initSocketServer(httpServer: HttpServer): AppServer {
 			credentials: true,
 		},
 	});
+
+	io.use(socketAuthMiddleware);
 
 	io.on("connection", (socket: AppSocket) => {
 		socket.on("error", (error: Error) => {

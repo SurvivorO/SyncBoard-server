@@ -7,6 +7,7 @@ export interface SocketData {
 
 export interface ServerToClientEvents {
 	error: (err: { message: string; code?: string }) => void;
+	auth_error: (err: { message: string; code?: string }) => void;
 	[key: string]: (...args: any[]) => void;
 }
 
