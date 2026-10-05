@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { db } from "../../prisma/db";
 import type { AuthenticatedRequest } from "../../types/server";
+import type { Models } from "../../prisma/contract";
 import {
 	ForbiddenError,
 	NotFoundError,
@@ -13,6 +14,19 @@ type Membership = Awaited<
 > extends { first: () => infer Result }
 	? Awaited<Result>
 	: never;
+type CardWithList = Pick<
+	Models.public_Card,
+	| "createdAt"
+	| "description"
+	| "dueDate"
+	| "id"
+	| "listId"
+	| "position"
+	| "priority"
+	| "title"
+	| "updatedAt"
+	| "version"
+> & { list: List };
 
 declare global {
 	namespace Express {
@@ -21,6 +35,8 @@ declare global {
 			locals: {
 				list?: List;
 				membership?: NonNullable<Membership>;
+				card?: CardWithList;
+				targetList?: List;
 			};
 		}
 	}
