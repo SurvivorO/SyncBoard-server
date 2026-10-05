@@ -22,6 +22,7 @@
     "express": "^5.2.1",
     "fractional-index": "^1.0.0",
     "jsonwebtoken": "^9.0.3",
+    "socket.io": "^4.8.4",
     "zod": "^4.6.5"
   },
   "devDependencies": {
