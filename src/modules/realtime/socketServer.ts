@@ -2,6 +2,7 @@ import type { Server as HttpServer } from "node:http";
 import { Server } from "socket.io";
 import { env } from "../../../env.js";
 import { socketAuthMiddleware } from "./socketAuth.js";
+import { registerRoomHandlers } from "./socketRooms.js";
 import type {
 	AppServer,
 	AppSocket,
@@ -30,6 +31,8 @@ export function initSocketServer(httpServer: HttpServer): AppServer {
 	io.use(socketAuthMiddleware);
 
 	io.on("connection", (socket: AppSocket) => {
+		registerRoomHandlers(io as AppServer, socket);
+
 		socket.on("error", (error: Error) => {
 			console.error(`Socket error for ${socket.id}:`, error);
 		});

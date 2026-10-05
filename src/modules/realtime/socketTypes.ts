@@ -8,10 +8,14 @@ export interface SocketData {
 export interface ServerToClientEvents {
 	error: (err: { message: string; code?: string }) => void;
 	auth_error: (err: { message: string; code?: string }) => void;
+	"board:joined": (data: { boardId: string }) => void;
+	"board:left": (data: { boardId: string }) => void;
 	[key: string]: (...args: any[]) => void;
 }
 
 export interface ClientToServerEvents {
+	"board:join": (data: { boardId: string }) => void;
+	"board:leave": (data: { boardId: string }) => void;
 	[key: string]: (...args: any[]) => void;
 }
 
