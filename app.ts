@@ -5,6 +5,7 @@ import errorHandler from "./src/modules/errors/errorHandler.js";
 import authRoutes from "./src/modules/auth/authRoutes.js";
 import { boardRoutes } from "./src/modules/boards/boardRoutes.js";
 import listsRoutes from "./src/modules/lists/listsRoutes.js";
+import cardsRoutes from "./src/modules/cards/cardsRoutes.js";
 
 const app = express();
 
@@ -17,6 +18,7 @@ app.use(express.json());
 app.use('/auth', authRoutes);
 app.use('/boards', boardRoutes());
 app.use('/', listsRoutes);
+app.use('/', cardsRoutes);
 
 // health check
 app.get('/health', (req, res) => res.json({
