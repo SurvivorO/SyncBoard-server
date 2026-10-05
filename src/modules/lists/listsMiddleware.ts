@@ -46,7 +46,6 @@ function getBoardId(req: Request): string | undefined {
 
 	if (
 		typeof req.params.id === "string" &&
-		req.baseUrl === "/boards" &&
 		req.path.endsWith("/lists")
 	) {
 		return req.params.id;
