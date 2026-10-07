@@ -1,16 +1,17 @@
 import fractionalIndex from "fractional-index";
 import { Temporal } from "@js-temporal/polyfill";
-import { db } from "../../prisma/db";
+import { db } from "../../prisma/db.js";
 import type { Models } from "../../prisma/contract";
 import {
 	BadRequestError,
 	ConflictError,
 	NotFoundError,
-} from "../errors/AppError";
+} from "../errors/AppError.js";
 import type {
 	CreateCardRequest,
 	UpdateCardRequest,
-} from "./cardsValidator";
+} from "./cardsValidator.js";
+import { broadcastCardEvent } from "../realtime/socketBroadcaster.js";
 
 type Card = Pick<
 	Models.public_Card,
@@ -88,7 +89,7 @@ async function createCard(
 	);
 
 	try {
-		return await db.orm.public.Card.create({
+		const createdCard = await db.orm.public.Card.create({
 			listId,
 			title,
 			description: description ?? null,
@@ -97,6 +98,14 @@ async function createCard(
 			position,
 			version: 0,
 		});
+
+		// Feature 5: Broadcast card:created event
+		broadcastCardEvent(list.boardId, "card:created", {
+			boardId: list.boardId,
+			card: createdCard,
+		}).catch(console.error);
+
+		return createdCard;
 	} catch (error) {
 		if (isConstraintError(error, "23505") || isConstraintError(error, "P2002")) {
 			throw ConflictError("A card position conflict occurred. Please try again.");
@@ -128,6 +137,8 @@ async function updateCard(
 		throw ConflictError("Card was modified by another request");
 	}
 
+	const list = await db.orm.public.List.where({ id: currentCard.listId }).first();
+
 	try {
 		const updatedCard = await db.orm.public.Card.where({ id: cardId }).update({
 			...updates,
@@ -137,6 +148,14 @@ async function updateCard(
 		if (!updatedCard) {
 			throw NotFoundError("Card not found");
 		}
+
+		if (list) {
+			broadcastCardEvent(list.boardId, "card:updated", {
+				boardId: list.boardId,
+				card: updatedCard,
+			}).catch(console.error);
+		}
+
 		return updatedCard;
 	} catch (error) {
 		if (
@@ -151,9 +170,23 @@ async function updateCard(
 
 async function deleteCard(cardId: string): Promise<void> {
 	try {
+		const currentCard = await db.orm.public.Card.where({ id: cardId }).first();
+		if (!currentCard) {
+			throw NotFoundError("Card not found");
+		}
+		const list = await db.orm.public.List.where({ id: currentCard.listId }).first();
+
 		const deletedCard = await db.orm.public.Card.where({ id: cardId }).delete();
 		if (!deletedCard) {
 			throw NotFoundError("Card not found");
+		}
+
+		if (list) {
+			broadcastCardEvent(list.boardId, "card:deleted", {
+				boardId: list.boardId,
+				cardId,
+				listId: list.id,
+			}).catch(console.error);
 		}
 	} catch (error) {
 		if (
@@ -182,7 +215,7 @@ async function moveCard(
 		);
 	}
 
-	return db.transaction(async (tx) => {
+	const result = await db.transaction(async (tx) => {
 		const card = await tx.orm.public.Card.where({ id: cardId }).first();
 		if (!card) {
 			throw NotFoundError("Card not found");
@@ -245,8 +278,19 @@ async function moveCard(
 			throw ConflictError("Card was modified by another request");
 		}
 
-		return updatedCard;
+		const targetList = await tx.orm.public.List.where({ id: toListId }).first();
+
+		return { updatedCard, boardId: targetList?.boardId };
 	});
+
+	if (result.boardId) {
+		broadcastCardEvent(result.boardId, "card:moved", {
+			boardId: result.boardId,
+			card: result.updatedCard,
+		}).catch(console.error);
+	}
+
+	return result.updatedCard;
 }
 
 async function getCardById(cardId: string): Promise<Card> {
